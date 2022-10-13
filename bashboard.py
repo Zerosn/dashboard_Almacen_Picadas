@@ -20,7 +20,10 @@ def millify(n):
 
 
 def Productos(Fecha_inicial,Fecha_final):
-    return pd.read_sql_query(f"SELECT NombreProducto as Producto, sum(Cantidad) as Ventas,sum(Cantidad*Precio) as Monto, strftime('%m',Factura.DtEmision)  as mes, strftime('%Y',Factura.DtEmision) as año FROM FacturaItem JOIN Factura on Factura.Id = FacturaItem.IdFactura WHERE Factura.DtEmision >= '{Fecha_inicial}' and Factura.DtEmision <='{Fecha_final}' GROUP by NombreProducto ORDER by Monto DESC",Conection_sql)
+    return pd.read_sql_query(f"""SELECT NombreProducto as Producto, sum(Cantidad) as Ventas,sum(Cantidad*Precio) as Monto, strftime('%m',Factura.DtEmision)  as mes, strftime('%Y',Factura.DtEmision) as año 
+                                    FROM FacturaItem JOIN Factura on Factura.Id = FacturaItem.IdFactura 
+                                    WHERE Factura.DtEmision >= '{Fecha_inicial}' and Factura.DtEmision <='{Fecha_final}' 
+                                    GROUP by NombreProducto ORDER by Monto DESC""",Conection_sql)
 
 
 def gaugue_chart(Valor,rango_max,Titulo):
@@ -30,15 +33,23 @@ def gaugue_chart(Valor,rango_max,Titulo):
                 gauge = {'axis': {'range': [None, rango_max]}},))
                 
 
+def bar_chart(Data,Xname,Yname):
+    return alt.Chart(Data[[Yname,Xname]]).mark_bar().encode(x=alt.X(Xname, sort=None),y=Yname)
 
 Folder_Path = r"c:\Users\horac\OneDrive\Documentos\GitHub\dashboard"
 #Folder_Path= pathlib.Path().parent.absolute()
 print(Folder_Path)
 Conection_sql = sqlite3.Connection(Folder_Path+"\FacturaLight.db")
 
-Ventas = pd.read_sql_query("Select Sum(Total) as Ventas,count(Total) as Clientes ,sum(Iva) as Impuestos, strftime('%m',DtEmision) as Mes, strftime('%Y',DtEmision) as Año From Factura Group By Mes,Año",Conection_sql)
+Ventas = pd.read_sql_query("""Select Sum(Total) as Ventas,count(Total) as Clientes ,sum(Iva) as Impuestos, strftime('%m',DtEmision) as Mes, strftime('%Y',DtEmision) as Año 
+                                From Factura 
+                                Group By Mes,Año""",Conection_sql)
 
-Productos_total = pd.read_sql_query("Select Nombre as Producto, Sum(Cantidad) as Cantidad, PRODUCTO.Costo, PRODUCTO.LP1 AS Precio From FacturaItem JOIN Producto ON Producto.Id = FacturaItem.IdProducto group by Producto order by cantidad desc limit 10 offset 3",Conection_sql)
+Productos_total = pd.read_sql_query("""Select Nombre as Producto, Sum(Cantidad) as Cantidad, PRODUCTO.Costo, PRODUCTO.LP1 AS Precio 
+                                        From FacturaItem 
+                                        JOIN Producto ON Producto.Id = FacturaItem.IdProducto 
+                                        Group by Producto 
+                                        Order by cantidad desc limit 10 offset 3""",Conection_sql)
 
 Ventas["Mes"]=pd.to_numeric(Ventas["Mes"])
 Ventas["Año"]=pd.to_numeric(Ventas["Año"])
@@ -49,6 +60,8 @@ st.set_page_config(layout="wide")
 #Sidebar
 ###
 with st.sidebar:
+    st.header("Filtros")
+    st.subheader("Seleccione Año y Mes")
     Lista_Meses=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
     año_Selection = st.selectbox("Año:",sorted(Ventas["Año"].unique(), reverse=True))
     Ventas_Act=Ventas.query(f'Año=={año_Selection}')
@@ -79,7 +92,9 @@ Crecimiento_Anual=((Ventas_Anual/ventas_ant["Ventas"].sum())-1)*100
 
 col1.metric("Ventas",f"$ {millify(Ventas_Anual)}",f"{Crecimiento_Anual:.2f} %")
 
-Dias_Ventas = pd.read_sql_query(f"Select count(distinct(strftime('%d-%m-%Y',DtEmision))) as Dias From Factura where Factura.DtEmision >= '{año_Selection}-01-01' and Factura.DtEmision <='{año_Selection}-12-31'",Conection_sql)
+Dias_Ventas = pd.read_sql_query(f"""Select count(distinct(strftime('%d-%m-%Y',DtEmision))) as Dias 
+                                    From Factura 
+                                    where Factura.DtEmision >= '{año_Selection}-01-01' and Factura.DtEmision <='{año_Selection}-12-31'""",Conection_sql)
 
 Estimacion = 365 *Ventas_Anual/ Dias_Ventas.iloc[0,0]
 col2.metric("Estimacion Ventas",f"{millify(Estimacion)}")
@@ -96,13 +111,26 @@ col4.metric("Factura Promedio",f"$ {Fact_Prom:.2f}",f"{((Fact_Prom/Fact_Prom_ant
 
 col1,col2 = tab1.columns(2)
 
+#Grafico de Ventas
+
 fig = gaugue_chart(Ventas_Act["Ventas"].sum(),ventas_ant["Ventas"].sum(),"Ventas Totales")
-col1.plotly_chart(fig,height=300,width=300)
+col1.plotly_chart(fig,height=300,use_container_width=True)
 
 fig = gaugue_chart(Ventas_Act["Clientes"].sum(),ventas_ant["Clientes"].sum(),"Clientes Totales")
 
-col2.plotly_chart(fig,height=300,width=300)
+col2.plotly_chart(fig,height=300,use_container_width=True)
 
+
+#Ventas x hora
+
+Ventas_agrup = pd.read_sql_query("""Select Sum(Total) as Ventas,count(Total) as Clientes , strftime('%H',DtAdd) as Hora 
+                                    From Factura Group By Hora """,Conection_sql)
+
+col1.subheader("Clientes por hora")
+col1.altair_chart(bar_chart(Ventas_agrup,"Hora","Clientes"),use_container_width=True)
+
+col2.subheader("Ventas por hora")
+col2.altair_chart(bar_chart(Ventas_agrup,"Hora","Ventas"),use_container_width=True)
 
 ####
 #Metricas Mensuales
@@ -127,13 +155,47 @@ Fact_Prom_ant=(ventas_ant.iloc[0,0]/ventas_ant.iloc[0,1])
 
 col3.metric("Factura Promedio",f"$ {Fact_Prom:.2f}",f"{((Fact_Prom/Fact_Prom_ant)-1)*100:.2f} %")
 
+#Grafico de ventas
+
 col1,col2 = tab2.columns(2)
 
 fig = gaugue_chart(Ventas_Act.iloc[0,0],ventas_ant.iloc[0,0],"Ventas Totales")
-col1.plotly_chart(fig,height=300,width=300)
+col1.plotly_chart(fig,height=300,use_container_width=True)
 
 fig = gaugue_chart(Ventas_Act.iloc[0,1],ventas_ant.iloc[0,1],"Clientes Totales")
-col2.plotly_chart(fig,height=300,width=300)
+col2.plotly_chart(fig,height=300,use_container_width=True)
+
+tab2.subheader("Mensual")
+
+col1,col2 = tab2.columns(2)
+#Ventas x dia
+
+Ventas_agrup = pd.read_sql_query(f"""Select Sum(Total) as Ventas,count(Total) as Clientes , strftime('%d',DtAdd) as Dia 
+                                    From Factura 
+                                    where DtAdd >= '{año_Selection}-{mes_Selection_index+1:02d}-01' and DtAdd <= '{año_Selection}-{mes_Selection_index+1:02d}-31' 
+                                    Group By Dia""",Conection_sql)
+
+col1.subheader("Clientes por hora")
+col1.altair_chart(bar_chart(Ventas_agrup,"Dia","Clientes"),use_container_width=True)
+
+col2.subheader("Ventas por hora")
+col2.altair_chart(bar_chart(Ventas_agrup,"Dia","Ventas"),use_container_width=True)
+
+tab2.subheader("Semanal")
+col1,col2 = tab2.columns(2)
+#Ventas x hora
+
+Ventas_agrup = pd.read_sql_query(f"""Select Sum(Total) as Ventas,count(Total) as Clientes , strftime('%H',DtAdd) as Hora 
+                                    From Factura 
+                                    where DtAdd >= '{año_Selection}-{mes_Selection_index+1:02d}-01' and DtAdd <= '{año_Selection}-{mes_Selection_index+1:02d}-31' 
+                                    Group By Hora""",Conection_sql)
+
+
+col1.subheader("Clientes por hora")
+col1.altair_chart(bar_chart(Ventas_agrup,"Hora","Clientes"),use_container_width=True)
+
+col2.subheader("Ventas por hora")
+col2.altair_chart(bar_chart(Ventas_agrup,"Hora","Ventas"),use_container_width=True)
 
 ###
 #Metricas 12 meses
@@ -155,10 +217,10 @@ col3.metric("Factura Promedio",f"$ {Fact_Prom:.2f}",f"{((Fact_Prom/Fact_Prom_ant
 col1,col2 = tab3.columns(2)
 
 fig = gaugue_chart(Ventas_Act.iloc[0,0],ventas_ant.iloc[0,0],"Ventas Totales")
-col1.plotly_chart(fig,height=300,width=300)
+col1.plotly_chart(fig,height=300,use_container_width=True)
 
 fig = gaugue_chart(Ventas_Act.iloc[0,1],ventas_ant.iloc[0,1],"Clientes Totales")
-col2.plotly_chart(fig,height=300,width=300)
+col2.plotly_chart(fig,height=300,use_container_width=True)
 
 
 ####
@@ -172,21 +234,13 @@ tab4.header(f"Metricas de Productos {mes_Selection} / {año_Selection} ")
 col1,col2 = tab4.columns(2)
 col1.subheader("Top 20 Productos mes")
 col1.write(Productos_mes)
-
-col1.write(alt.Chart(Productos_mes[["Producto","Monto"]][0:20]).mark_bar().encode(
-    x=alt.X('Producto', sort=None),
-    y='Monto',
-).properties(height=500))
+col1.altair_chart(bar_chart(Productos_mes[["Producto","Monto"]][0:20],"Producto","Monto"),use_container_width=True)
 
 Productos_Anual=Productos(f"{año_Selection}-01-1",f"{año_Selection}-12-31")
 col2.subheader("Top 20 Productos Anual")
 col2.write(Productos_Anual)
 
-col2.write(alt.Chart(Productos_Anual[["Producto","Monto"]][0:20]).mark_bar().encode(
-    x=alt.X('Producto', sort=None),
-    y='Monto',
-).properties(height=500))
-
+col2.altair_chart(bar_chart(Productos_Anual[["Producto","Monto"]][0:20],"Producto","Monto"),use_container_width=True)
 
 ###
 #Productos aumentos y bajas
@@ -196,8 +250,9 @@ Productos_mes=Productos(f"{año_Selection}-{mes_Selection_index+1:02d}-1",f"{añ
 
 tab5.header(f"Variacion de Productos {mes_Selection} / {año_Selection}")
 
-if mes_Selection_index==1:
+if mes_Selection_index==0:
     mes_Selection_index=11
+    año_Selection-=1
 
 Productos_mes_2=Productos(f"{año_Selection}-{mes_Selection_index:02d}-1",f"{año_Selection}-{mes_Selection_index:02d}-31")
 Producto_comparacion=  pd.merge(Productos_mes,Productos_mes_2,on="Producto")
